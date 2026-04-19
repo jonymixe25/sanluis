@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { Mountain, MonitorPlay, Library, Home, Users, LogIn, LogOut, User, Languages } from "lucide-react";
+import { Mountain, MonitorPlay, Library, Home, Users, LogIn, LogOut, User, Languages, Video } from "lucide-react";
 import { auth, loginWithGoogle, logout } from "../firebase";
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
@@ -22,6 +22,7 @@ export default function Navbar() {
     { path: "/view", label: "Ver", icon: MonitorPlay },
     { path: "/recordings", label: "Grabaciones", icon: Library },
     { path: "/team", label: t.nav.team, icon: Users },
+    { path: "/admin", label: t.broadcast.title, icon: Video },
   ];
 
   return (

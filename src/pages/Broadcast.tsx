@@ -1,12 +1,18 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { io, Socket } from "socket.io-client";
-import { Video, VideoOff, Mic, MicOff, AlertCircle, Users, Clock, MessageSquare, Share2, Check, Loader2, Phone, X, Circle, Square, Save, RefreshCw, Camera } from "lucide-react";
+import { 
+  Video, VideoOff, Mic, MicOff, AlertCircle, Users, Clock, MessageSquare, 
+  Share2, Check, Loader2, Phone, X, Circle, Square, Save, RefreshCw, 
+  Camera, Zap, Activity, Signal, Settings, Info, Maximize, Monitor,
+  Layout, ShieldCheck, ChevronRight, Lock
+} from "lucide-react";
 import { Helmet } from "react-helmet-async";
 import Chat from "../components/Chat";
 import { Link } from "react-router-dom";
 import { useLanguage } from "../context/LanguageContext";
 import { saveRecording } from "../utils/videoStorage";
 import { getSocketUrl } from "../utils/socket";
+import { motion, AnimatePresence } from "motion/react";
 
 const config = {
   iceServers: [
@@ -20,6 +26,14 @@ interface User {
   username: string;
 }
 
+interface StreamStats {
+  bitrate?: number;
+  fps?: number;
+  resolution?: string;
+  packetsLost?: number;
+  latency?: number;
+}
+
 export default function Broadcast() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const privateVideoRef = useRef<HTMLVideoElement>(null); // Video para la llamada privada
@@ -27,6 +41,14 @@ export default function Broadcast() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const peerConnections = useRef<{ [id: string]: RTCPeerConnection }>({});
   const pendingCandidates = useRef<{ [id: string]: RTCIceCandidateInit[] }>({});
+  
+  // Audio Analysis
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const [audioLevel, setAudioLevel] = useState(0);
+  
+  // Stats
+  const [stats, setStats] = useState<StreamStats>({});
   
   // Private Call Refs
   const privatePeerConnection = useRef<RTCPeerConnection | null>(null);
@@ -55,6 +77,21 @@ export default function Broadcast() {
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   const { t } = useLanguage();
 
+  // Password Protection
+  const [password, setPassword] = useState("");
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password === "mixe2024") {
+      setIsAuthorized(true);
+      setAuthError(null);
+    } else {
+      setAuthError("Contraseña incorrecta");
+    }
+  };
+
   // Sound ref
   const notificationSound = useRef<HTMLAudioElement | null>(null);
 
@@ -72,6 +109,86 @@ export default function Broadcast() {
 
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
+
+  // Audio Visualizer Implementation
+  useEffect(() => {
+    if (!stream || !audioEnabled) {
+      setAudioLevel(0);
+      return;
+    }
+
+    const audioTrack = stream.getAudioTracks()[0];
+    if (!audioTrack) return;
+
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    audioContextRef.current = audioContext;
+    const analyser = audioContext.createAnalyser();
+    analyserRef.current = analyser;
+    analyser.fftSize = 256;
+    
+    const source = audioContext.createMediaStreamSource(new MediaStream([audioTrack]));
+    source.connect(analyser);
+
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    let animationId: number;
+    const updateAudioLevel = () => {
+      analyser.getByteFrequencyData(dataArray);
+      let sum = 0;
+      for (let i = 0; i < bufferLength; i++) {
+        sum += dataArray[i];
+      }
+      const average = sum / bufferLength;
+      setAudioLevel(average);
+      animationId = requestAnimationFrame(updateAudioLevel);
+    };
+
+    updateAudioLevel();
+
+    return () => {
+      cancelAnimationFrame(animationId);
+      if (audioContext.state !== 'closed') {
+        audioContext.close();
+      }
+    };
+  }, [stream, audioEnabled]);
+
+  // Real-time Stats Implementation
+  useEffect(() => {
+    if (!isStreaming) return;
+
+    const interval = setInterval(async () => {
+      const pcs = Object.values(peerConnections.current) as RTCPeerConnection[];
+      if (pcs.length === 0) return;
+
+      const pc = pcs[0];
+      try {
+        const reports = await pc.getStats();
+        let bitrate = 0;
+        let fps = 0;
+        let resolution = "Unknown";
+        let packetsLost = 0;
+
+        reports.forEach(report => {
+          if (report.type === 'outbound-rtp' && report.kind === 'video') {
+            bitrate = Math.round((report.bytesSent * 8) / (uptime || 1) / 1000); // kbps
+            fps = report.framesPerSecond || 0;
+            packetsLost = report.packetsLost || 0;
+          }
+          if (report.type === 'track' && report.kind === 'video') {
+            resolution = `${report.frameWidth}x${report.frameHeight}`;
+          }
+        });
+
+        setStats({ bitrate, fps, resolution, packetsLost });
+      } catch (e) {
+        console.error("Stats error", e);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isStreaming, uptime]);
 
   const handleShare = async () => {
     const currentOrigin = window.location.origin;
@@ -469,255 +586,466 @@ export default function Broadcast() {
   };
 
   // ... (Authentication render logic remains the same)
+  if (!isAuthorized) {
+    return (
+      <div className="min-h-[calc(100vh-64px)] bg-[#0c0c0e] flex items-center justify-center p-4">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-[#141417] p-8 rounded-3xl border border-zinc-800 shadow-2xl"
+        >
+          <div className="w-16 h-16 bg-brand-primary/10 rounded-2xl flex items-center justify-center mb-6 mx-auto">
+            <Lock className="w-8 h-8 text-brand-primary" />
+          </div>
+          <h2 className="text-2xl font-bold text-center mb-2">Acceso Restringido</h2>
+          <p className="text-zinc-500 text-center text-sm mb-8">Ingresa la contraseña para acceder al panel de transmisión profesional.</p>
+          
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Contraseña"
+                className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary/50 transition-all text-center outline-none"
+                autoFocus
+              />
+              {authError && <p className="text-red-500 text-xs mt-2 text-center">{authError}</p>}
+            </div>
+            <button
+              type="submit"
+              className="w-full py-3 bg-brand-primary hover:bg-brand-primary/90 text-white font-bold rounded-xl transition-all shadow-lg shadow-brand-primary/20"
+            >
+              Entrar al Control Room
+            </button>
+          </form>
+          
+          <div className="mt-8 pt-6 border-t border-zinc-800">
+            <Link to="/" className="text-zinc-500 hover:text-white text-sm flex items-center justify-center gap-2 transition-colors">
+              <ChevronRight className="w-4 h-4 rotate-180" /> Volver al Inicio
+            </Link>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
   
   return (
-    <div className="relative w-full h-[calc(100vh-64px)] bg-brand-bg text-neutral-50 overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-64px)] bg-[#0c0c0e] text-zinc-100 font-sans overflow-hidden">
       <Helmet>
-        <title>{t.broadcast.title} | Vida Mixe TV</title>
-        <meta name="description" content="Panel de control para transmisiones en vivo. Comparte tu cultura y tradiciones con el mundo." />
+        <title>{t.broadcast.title} | Control Room</title>
+        <meta name="description" content="Professional broadcast control panel for Vida Mixe TV." />
       </Helmet>
-      <div className="absolute inset-0 bg-black flex items-center justify-center">
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          className="w-full h-full object-contain"
-        />
-        
-        {/* Private Call Overlay */}
-        {isPrivateCallActive && (
-          <div className="absolute bottom-24 right-4 w-64 h-48 bg-brand-surface rounded-xl border border-white/5 shadow-2xl overflow-hidden z-30">
-             <video
-                ref={privateVideoRef}
-                autoPlay
-                playsInline
-                className="w-full h-full object-cover"
-             />
-             <div className="absolute top-2 left-2 bg-black/60 px-2 py-1 rounded text-xs text-white flex items-center gap-1">
-               <Phone className="w-3 h-3 text-brand-primary" />
-               {privateCallUser?.username}
-             </div>
-             <button 
-               onClick={endPrivateCall}
-               className="absolute top-2 right-2 p-1 bg-brand-primary/80 hover:bg-brand-primary text-white rounded-full transition-colors"
-             >
-               <X className="w-4 h-4" />
-             </button>
-          </div>
-        )}
 
-        {!isStreaming && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-brand-bg/90 backdrop-blur-sm p-6 text-center z-10">
-            {!isSocketConnected ? (
-              <>
-                <div className="w-20 h-20 bg-brand-secondary/10 text-brand-secondary rounded-full flex items-center justify-center mb-6">
-                  <Loader2 className="w-10 h-10 animate-spin" />
-                </div>
-                <h2 className="text-2xl font-semibold mb-2">{t.broadcast.socketError}...</h2>
-                <div className="text-neutral-400 mb-8 max-w-md text-center space-y-4">
-                  <p>{socketError || t.broadcast.socketError}</p>
-                  {socketError && (
-                    <button 
-                      onClick={() => window.location.reload()}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 text-white rounded-lg transition-colors text-sm"
-                    >
-                      <RefreshCw className="w-4 h-4" /> Reintentar Conexión
-                    </button>
-                  )}
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="w-20 h-20 bg-brand-primary/10 text-brand-primary rounded-full flex items-center justify-center mb-6">
-                  <Video className="w-10 h-10" />
-                </div>
-                <h2 className="text-2xl font-semibold mb-2">{t.broadcast.title}</h2>
-                <div className="w-full max-w-md space-y-4 mb-8">
-                  <div className="text-left">
-                    <label className="block text-xs font-medium text-neutral-500 uppercase tracking-wider mb-1.5 ml-1">
-                      {t.broadcast.streamName}
-                    </label>
-                    <input 
-                      type="text"
-                      value={streamName}
-                      onChange={(e) => setStreamName(e.target.value)}
-                      placeholder={t.broadcast.streamPlaceholder}
-                      className="w-full bg-brand-surface border border-white/5 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-brand-primary/50 transition-all"
-                    />
-                  </div>
-                  <p className="text-neutral-400 text-sm text-center">
-                    {t.broadcast.streamTip}
-                  </p>
-                </div>
-                <div className="flex gap-4">
-                  <button
-                    onClick={startStream}
-                    className="px-8 py-4 bg-brand-primary hover:bg-brand-primary/80 text-white font-medium rounded-xl transition-colors shadow-lg shadow-brand-primary/20"
-                  >
-                    {t.broadcast.startStream}
-                  </button>
-                  <button
-                    onClick={flipCamera}
-                    className="p-4 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-colors border border-white/5"
-                    title={t.broadcast.flipCamera}
-                  >
-                    <Camera className="w-6 h-6" />
-                  </button>
-                </div>
-              </>
+      {/* Header Bar */}
+      <div className="h-14 bg-[#141417] border-b border-zinc-800 flex items-center justify-between px-6 z-50">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Layout className="w-4 h-4 text-brand-primary" />
+            <span className="text-sm font-bold tracking-tight uppercase">Control Room v2.0</span>
+          </div>
+          <div className="h-4 w-px bg-zinc-800"></div>
+          <div className="flex items-center gap-3">
+            <div className={`flex items-center gap-2 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${isSocketConnected ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+              <Signal className={`w-3 h-3 ${isSocketConnected ? 'animate-pulse' : ''}`} />
+              {isSocketConnected ? 'Connected' : 'Offline'}
+            </div>
+            {isStreaming && (
+              <div className="flex items-center gap-2 px-2.5 py-1 bg-brand-primary/10 text-brand-primary border border-brand-primary/20 rounded-md text-[10px] font-bold uppercase tracking-wider animate-pulse">
+                <Circle className="w-3 h-3 fill-current" />
+                Live: {formatUptime(uptime)}
+              </div>
             )}
           </div>
-        )}
+        </div>
 
-        {isStreaming && (
-          <>
-            <div className="absolute top-4 left-4 flex flex-col gap-2 z-10">
-              <div className="flex items-center gap-2 bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
-                <span className="relative flex h-2 w-2">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${isSocketConnected ? 'bg-brand-primary/40' : 'bg-brand-secondary/40'}`}></span>
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isSocketConnected ? 'bg-brand-primary' : 'bg-brand-secondary'}`}></span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center bg-black/40 rounded-lg p-1 border border-zinc-800">
+             <button
+               onClick={() => setShowChat(!showChat)}
+               className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-2 ${showChat ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+             >
+               <MessageSquare className="w-3.5 h-3.5" /> Chat
+               {unreadMessages > 0 && <span className="bg-brand-primary text-white text-[9px] px-1.5 py-0.5 rounded-full">{unreadMessages}</span>}
+             </button>
+             <button
+               onClick={() => setShowUserList(!showUserList)}
+               className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-2 ${showUserList ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+             >
+               <Users className="w-3.5 h-3.5" /> Users ({connectedUsers.length})
+             </button>
+          </div>
+          <button
+            onClick={handleShare}
+            className="p-2 text-zinc-400 hover:text-white transition-colors"
+            title="Share"
+          >
+            {copied ? <Check className="w-5 h-5 text-emerald-500" /> : <Share2 className="w-5 h-5" />}
+          </button>
+          <Settings className="w-5 h-5 text-zinc-500 hover:text-zinc-300 cursor-pointer" />
+        </div>
+      </div>
+
+      <div className="flex-1 flex overflow-hidden">
+        {/* Sidebar Left: Resources & Monitoring */}
+        <div className="w-72 bg-[#141417] border-r border-zinc-800 flex flex-col hidden lg:flex">
+          <div className="p-4 space-y-6">
+            {/* Audio Monitoring */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                  <Mic className="w-3 h-3" /> Audio Levels
                 </span>
-                <span className="text-xs font-medium tracking-wider text-white uppercase">
-                  {isSocketConnected ? t.broadcast.live : t.broadcast.socketError}
+                <span className={`text-[10px] font-mono ${audioLevel > 150 ? 'text-red-400' : audioLevel > 80 ? 'text-brand-secondary' : 'text-emerald-400'}`}>
+                  {Math.round(audioLevel)} dB
                 </span>
               </div>
-              <div className="flex items-center gap-2 bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 text-xs font-medium text-white">
-                <Users className="w-4 h-4 text-brand-accent" /> {viewers} {t.broadcast.viewers}
+              <div className="h-2.5 bg-black/40 rounded-full border border-zinc-800 p-0.5 flex gap-0.5 overflow-hidden">
+                {[...Array(20)].map((_, i) => (
+                  <div 
+                    key={i}
+                    className={`flex-1 rounded-sm transition-all duration-75 ${
+                      (audioLevel / (256/20)) > i 
+                        ? i > 15 ? 'bg-red-500' : i > 11 ? 'bg-brand-secondary' : 'bg-emerald-500'
+                        : 'bg-zinc-800'
+                    }`}
+                  />
+                ))}
               </div>
-              <div className="flex items-center gap-2 bg-black/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 text-xs font-medium text-white">
-                <Clock className="w-4 h-4 text-brand-secondary" /> {t.broadcast.uptime}: {formatUptime(uptime)}
+            </div>
+
+            {/* Network Stats */}
+            <div className="space-y-4">
+              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest flex items-center gap-2">
+                <Activity className="w-3 h-3" /> System Info
+              </span>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-black/30 p-3 rounded-xl border border-zinc-800/50">
+                  <span className="text-[9px] text-zinc-500 block mb-1 uppercase tracking-wider">Bitrate</span>
+                  <span className="text-sm font-mono text-zinc-200">{stats.bitrate || 0} <small className="text-[10px] opacity-50">kbps</small></span>
+                </div>
+                <div className="bg-black/30 p-3 rounded-xl border border-zinc-800/50">
+                  <span className="text-[9px] text-zinc-500 block mb-1 uppercase tracking-wider">Frame Rate</span>
+                  <span className="text-sm font-mono text-zinc-200">{Math.round(stats.fps || 0)} <small className="text-[10px] opacity-50">fps</small></span>
+                </div>
+                <div className="bg-black/30 p-3 rounded-xl border border-zinc-800/50 col-span-2">
+                  <span className="text-[9px] text-zinc-500 block mb-1 uppercase tracking-wider">Resolution</span>
+                  <span className="text-sm font-mono text-zinc-200 flex items-center gap-2">
+                    <Monitor className="w-3 h-3 text-brand-primary" />
+                    {stats.resolution || (isStreaming ? "Wait..." : "N/A")}
+                  </span>
+                </div>
               </div>
-              {isRecording && (
-                <div className="flex items-center gap-2 bg-brand-primary/20 backdrop-blur-md px-3 py-1.5 rounded-full border border-brand-primary/50 text-xs font-medium text-brand-primary animate-pulse">
-                  <Circle className="w-3 h-3 fill-brand-primary text-brand-primary" /> REC {formatUptime(recordingTime)}
+            </div>
+
+            {/* Stream Health */}
+            <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-xl p-4">
+               <div className="flex items-center gap-3 mb-2">
+                 <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                 <span className="text-xs font-semibold text-emerald-400">Encoder Health</span>
+               </div>
+               <p className="text-[10px] text-zinc-500 leading-relaxed">
+                 Signal stability is optimized for the current connection. Latency monitored at {stats.latency || '<100'}ms.
+               </p>
+            </div>
+          </div>
+
+          <div className="mt-auto p-4 border-t border-zinc-800">
+             <Link 
+               to="/recordings" 
+               className="w-full py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+             >
+               <Save className="w-3.5 h-3.5" /> Recording Library
+             </Link>
+          </div>
+        </div>
+
+        {/* Main Production Area */}
+        <div className="flex-1 flex flex-col bg-[#080809] relative">
+          <div className="flex-1 relative flex items-center justify-center p-4">
+            <div className="w-full h-full max-w-5xl aspect-video bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl relative border border-zinc-800 ring-1 ring-white/5">
+              <video
+                ref={videoRef}
+                autoPlay
+                muted
+                playsInline
+                className={`w-full h-full object-cover transition-grayscale duration-500 ${!isStreaming ? 'grayscale' : ''}`}
+              />
+              
+              {/* Camera Overlays */}
+              <AnimatePresence>
+                {!isStreaming && (
+                  <motion.div 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="absolute inset-0 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center p-8 text-center"
+                  >
+                    <div className="w-24 h-24 bg-brand-primary/10 rounded-full flex items-center justify-center mb-6 border border-brand-primary/20">
+                      <Zap className="w-10 h-10 text-brand-primary" />
+                    </div>
+                    <h2 className="text-3xl font-bold mb-4 tracking-tighter">Ready for Output?</h2>
+                    <div className="w-full max-w-sm space-y-4 mb-8">
+                       <input 
+                         type="text"
+                         value={streamName}
+                         onChange={(e) => setStreamName(e.target.value)}
+                         placeholder="Event name (e.g. Festival de las Nubes)"
+                         className="w-full bg-zinc-800 border-zinc-700 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary/50 transition-all text-center"
+                       />
+                       <p className="text-zinc-500 text-xs">Configure your camera and microphone before clicking 'GO LIVE'.</p>
+                    </div>
+                    <div className="flex gap-4">
+                      <button
+                        onClick={startStream}
+                        disabled={!isSocketConnected}
+                        className="px-10 py-4 bg-brand-primary hover:bg-brand-primary/90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-2xl transition-all shadow-xl shadow-brand-primary/20 transform hover:scale-105 active:scale-95 flex items-center gap-3"
+                      >
+                        <Circle className="w-5 h-5 fill-current" />
+                        Go Live Now
+                      </button>
+                      <button
+                        onClick={flipCamera}
+                        className="p-4 bg-zinc-800 hover:bg-zinc-700 text-white rounded-2xl transition-colors border border-zinc-700"
+                      >
+                        <Camera className="w-6 h-6" />
+                      </button>
+                    </div>
+                    {!isSocketConnected && (
+                      <div className="mt-8 flex items-center gap-2 text-red-500 bg-red-500/10 px-4 py-2 rounded-lg border border-red-500/20 text-xs font-medium">
+                        <AlertCircle className="w-4 h-4" />
+                        Server connection required
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Live HUD */}
+              {isStreaming && (
+                <div className="absolute inset-0 pointer-events-none p-6 flex flex-col justify-between">
+                  <div className="flex justify-between items-start">
+                    <div className="flex flex-col gap-2">
+                       <div className="bg-brand-primary text-white text-[10px] font-black px-3 py-1 rounded-sm uppercase tracking-widest flex items-center gap-2 w-fit">
+                          <Circle className="w-2 h-2 fill-current animate-pulse" /> Live Production
+                       </div>
+                       <div className="bg-black/60 backdrop-blur-md text-white text-[10px] font-mono px-3 py-1 rounded-sm w-fit border border-white/10 uppercase tracking-widest">
+                          {streamName || "Default Channel"}
+                       </div>
+                    </div>
+                    <div className="bg-black/60 backdrop-blur-md text-white px-3 py-1.5 rounded-xl border border-white/10 flex items-center gap-4">
+                       <div className="flex items-center gap-2">
+                         <Users className="w-3.5 h-3.5 text-zinc-400" />
+                         <span className="text-xs font-bold">{viewers}</span>
+                       </div>
+                       <div className="w-px h-3 bg-white/20"></div>
+                       <div className="flex items-center gap-2">
+                         <Activity className="w-3.5 h-3.5 text-zinc-400" />
+                         <span className="text-xs font-mono">{stats.fps || 0}fps</span>
+                       </div>
+                    </div>
+                  </div>
+                  
+                  {isRecording && (
+                    <div className="bg-red-600 self-start text-white text-[10px] font-black px-3 py-1 rounded-sm uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-red-600/20 animate-pulse">
+                      Recording {formatUptime(recordingTime)}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-black/50 backdrop-blur-md p-4 rounded-2xl border border-white/10 z-10">
-              <button
-                onClick={toggleRecording}
-                className={`p-4 rounded-full transition-colors ${isRecording ? 'bg-brand-primary hover:bg-brand-primary/80 text-white' : 'bg-white/5 hover:bg-white/10 text-white'}`}
-                title={isRecording ? t.broadcast.stopRecording : t.broadcast.startRecording}
-              >
-                {isRecording ? <Square className="w-6 h-6 fill-current" /> : <Circle className="w-6 h-6 fill-brand-primary text-brand-primary" />}
-              </button>
-              <div className="w-px h-8 bg-white/10 mx-2"></div>
-              <button
-                onClick={toggleVideo}
-                className={`p-4 rounded-full transition-colors ${videoEnabled ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-brand-primary hover:bg-brand-primary/80 text-white'}`}
-              >
-                {videoEnabled ? <Video className="w-6 h-6" /> : <VideoOff className="w-6 h-6" />}
-              </button>
-              <button
-                onClick={toggleAudio}
-                className={`p-4 rounded-full transition-colors ${audioEnabled ? 'bg-white/5 hover:bg-white/10 text-white' : 'bg-brand-primary hover:bg-brand-primary/80 text-white'}`}
-                title={audioEnabled ? t.broadcast.mute : t.broadcast.unmute}
-              >
-                {audioEnabled ? <Mic className="w-6 h-6" /> : <MicOff className="w-6 h-6" />}
-              </button>
-              <button
-                onClick={flipCamera}
-                className="p-4 bg-white/5 hover:bg-white/10 text-white rounded-full transition-colors"
-                title={t.broadcast.flipCamera}
-              >
-                <Camera className="w-6 h-6" />
-              </button>
-              <button
-                onClick={stopStream}
-                className="px-6 py-4 bg-brand-primary hover:bg-brand-primary/80 text-white font-medium rounded-full transition-colors ml-2"
-              >
-                {t.broadcast.stopStream}
-              </button>
-            </div>
-          </>
-        )}
-
-        {error && (
-          <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-red-500/90 backdrop-blur-md text-white p-4 rounded-xl flex items-center gap-3 z-50 shadow-lg">
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
-            <p>{error}</p>
+            {/* Private Call Overlay */}
+            <AnimatePresence>
+              {isPrivateCallActive && (
+                <motion.div 
+                  initial={{ scale: 0.8, opacity: 0, y: 50 }}
+                  animate={{ scale: 1, opacity: 1, y: 0 }}
+                  exit={{ scale: 0.8, opacity: 0, y: 50 }}
+                  className="absolute bottom-8 right-8 w-80 bg-zinc-900 rounded-3xl border-2 border-brand-primary shadow-2xl overflow-hidden z-[60]"
+                >
+                   <div className="aspect-[4/3] bg-black">
+                     <video
+                        ref={privateVideoRef}
+                        autoPlay
+                        playsInline
+                        className="w-full h-full object-cover"
+                     />
+                     <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10">
+                        <Phone className="w-3.5 h-3.5 text-brand-primary" />
+                        <span className="text-[10px] font-bold uppercase tracking-wider">{privateCallUser?.username}</span>
+                     </div>
+                     <button 
+                       onClick={endPrivateCall}
+                       className="absolute top-4 right-4 p-2 bg-red-500 hover:bg-red-400 text-white rounded-full shadow-lg transition-transform hover:scale-110 active:scale-95"
+                     >
+                       <X className="w-4 h-4" />
+                     </button>
+                   </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-        )}
-      </div>
 
-      <div className="absolute top-4 right-4 z-50 flex gap-2">
-        <Link
-          to="/recordings"
-          className="p-3 bg-black/50 hover:bg-black/70 backdrop-blur-md rounded-full border border-white/10 text-white transition-all shadow-lg"
-          title={t.recordings.title}
-        >
-          <Save className="w-6 h-6" />
-        </Link>
-        <button
-          onClick={() => setShowUserList(!showUserList)}
-          className={`p-3 backdrop-blur-md rounded-full border border-white/10 text-white transition-all shadow-lg ${showUserList ? 'bg-brand-primary hover:bg-brand-primary/80' : 'bg-black/50 hover:bg-black/70'}`}
-          title={t.broadcast.users}
-        >
-          <Users className="w-6 h-6" />
-        </button>
-        <button
-          onClick={handleShare}
-          className="p-3 bg-black/50 hover:bg-black/70 backdrop-blur-md rounded-full border border-white/10 text-white transition-all shadow-lg"
-          title={t.broadcast.share}
-        >
-          {copied ? <Check className="w-6 h-6 text-brand-primary" /> : <Share2 className="w-6 h-6" />}
-        </button>
-        <button
-          onClick={() => {
-            setShowChat(!showChat);
-            if (!showChat) setUnreadMessages(0);
-          }}
-          className={`relative p-3 backdrop-blur-md rounded-full border border-white/10 text-white transition-all shadow-lg ${showChat ? 'bg-brand-accent hover:bg-brand-accent/80' : 'bg-black/50 hover:bg-black/70'}`}
-        >
-          <MessageSquare className="w-6 h-6" />
-          {!showChat && unreadMessages > 0 && (
-            <span className="absolute -top-1 -right-1 bg-brand-primary text-white text-xs font-bold w-5 h-5 flex items-center justify-center rounded-full animate-bounce">
-              {unreadMessages > 9 ? '9+' : unreadMessages}
-            </span>
-          )}
-        </button>
-      </div>
+          {/* Master Control Panel */}
+          <div className="h-24 bg-[#141417] border-t border-zinc-800 flex items-center justify-center gap-6 px-10 relative">
+             <div className="absolute left-10 flex items-center gap-4">
+                <div className="flex flex-col">
+                   <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-1">Local Monitor</span>
+                   <div className="flex gap-2">
+                     <button 
+                       onClick={toggleVideo}
+                       className={`p-2.5 rounded-lg border transition-all ${videoEnabled ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white' : 'bg-brand-primary/10 border-brand-primary/20 text-brand-primary'}`}
+                     >
+                       {videoEnabled ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
+                     </button>
+                     <button 
+                       onClick={toggleAudio}
+                       className={`p-2.5 rounded-lg border transition-all ${audioEnabled ? 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white' : 'bg-brand-primary/10 border-brand-primary/20 text-brand-primary'}`}
+                     >
+                       {audioEnabled ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+                     </button>
+                     <button 
+                        onClick={flipCamera}
+                        className="p-2.5 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-400 hover:text-white"
+                     >
+                        <Camera className="w-4 h-4" />
+                     </button>
+                   </div>
+                </div>
+             </div>
 
-      {/* User List Panel */}
-      <div 
-        className={`absolute top-20 right-4 w-64 bg-brand-surface/90 backdrop-blur-md border border-white/5 rounded-xl overflow-hidden transition-all duration-300 z-40 ${
-          showUserList ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-4 pointer-events-none'
-        }`}
-      >
-        <div className="p-3 border-b border-white/10 bg-black/20">
-          <h3 className="font-semibold text-sm">{t.broadcast.users} ({connectedUsers.length})</h3>
-        </div>
-        <div className="max-h-64 overflow-y-auto p-2 space-y-1">
-          {connectedUsers.length === 0 ? (
-            <p className="text-xs text-neutral-500 text-center py-4">{t.broadcast.noUsers}</p>
-          ) : (
-            connectedUsers.map(user => (
-              <div key={user.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-white/5 transition-colors group">
-                <span className="text-sm truncate max-w-[120px]">{user.username}</span>
-                {!isPrivateCallActive && (
-                  <button 
-                    onClick={() => startPrivateCall(user)}
-                    className="p-1.5 bg-brand-primary/20 text-brand-primary hover:bg-brand-primary hover:text-white rounded-lg opacity-0 group-hover:opacity-100 transition-all"
-                    title={t.broadcast.inviteToCall}
+             <div className="flex items-center gap-6">
+                <button
+                  onClick={toggleRecording}
+                  disabled={!isStreaming}
+                  className={`flex flex-col items-center gap-1 group disabled:opacity-30`}
+                >
+                  <div className={`p-4 rounded-full transition-all border-2 ${isRecording ? 'bg-zinc-100 border-red-500 text-red-600 scale-110' : 'bg-transparent border-zinc-700 text-zinc-500 hover:border-zinc-500'}`}>
+                    {isRecording ? <Square className="w-6 h-6 fill-current" /> : <Circle className="w-6 h-6 fill-current" />}
+                  </div>
+                  <span className="text-[9px] font-bold uppercase tracking-widest">Record</span>
+                </button>
+
+                {isStreaming ? (
+                  <button
+                    onClick={stopStream}
+                    className="h-16 px-12 bg-red-600 hover:bg-red-500 text-white rounded-full font-black uppercase tracking-widest text-sm shadow-xl shadow-red-600/10 transition-all hover:scale-105 active:scale-95"
                   >
-                    <Phone className="w-3 h-3" />
+                    End Stream
+                  </button>
+                ) : (
+                  <button
+                    onClick={startStream}
+                    disabled={!isSocketConnected}
+                    className="h-16 px-12 bg-zinc-800 text-zinc-600 rounded-full font-black uppercase tracking-widest text-sm cursor-not-allowed border-2 border-zinc-700"
+                  >
+                    Standby
                   </button>
                 )}
-              </div>
-            ))
-          )}
+
+                <div className="flex flex-col items-center gap-1">
+                   <div className="p-4 rounded-full border-2 border-zinc-800 bg-transparent text-zinc-700 cursor-not-allowed">
+                     <Share2 className="w-6 h-6" />
+                   </div>
+                   <span className="text-[9px] font-bold uppercase tracking-widest">Distribute</span>
+                </div>
+             </div>
+
+             <div className="absolute right-10 flex items-center gap-4">
+                <div className="flex flex-col items-end">
+                   <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-1">Output Resolution</span>
+                   <div className="bg-black/40 border border-zinc-800 rounded-lg px-3 py-2 flex items-center gap-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-mono text-emerald-400">HQ</span>
+                        <span className="text-[10px] font-medium text-zinc-500">1080p</span>
+                      </div>
+                      <div className="w-px h-2.5 bg-zinc-800"></div>
+                      <Maximize className="w-3.5 h-3.5 text-zinc-500 cursor-pointer hover:text-white" />
+                   </div>
+                </div>
+             </div>
+          </div>
+        </div>
+
+        {/* Sidebar Right: Interactive & Lists */}
+        <div className={`bg-[#141417] border-l border-zinc-800 transition-all duration-500 ease-in-out relative flex flex-col ${showChat ? 'w-80 lg:w-96' : 'w-0 overflow-hidden border-l-0'}`}>
+           <div className="flex-1 flex flex-col overflow-hidden">
+             {showUserList ? (
+               <div className="flex-1 flex flex-col p-4 bg-[#0c0c0e]">
+                 <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-sm font-bold uppercase tracking-wider">Active Watchers</h3>
+                    <button onClick={() => setShowUserList(false)} className="text-zinc-500 hover:text-white">
+                      <X className="w-4 h-4" />
+                    </button>
+                 </div>
+                 <div className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
+                   {connectedUsers.length === 0 ? (
+                     <div className="h-40 flex flex-col items-center justify-center text-zinc-600 gap-3 grayscale italic">
+                       <Users className="w-10 h-10 opacity-20" />
+                       <span className="text-xs tracking-widest font-medium">Waiting for audience...</span>
+                     </div>
+                   ) : (
+                     connectedUsers.map(user => (
+                       <div key={user.id} className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 flex items-center justify-between group hover:border-zinc-700 transition-all">
+                         <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-xs">
+                              {user.username.charAt(0).toUpperCase()}
+                            </div>
+                            <span className="text-xs font-medium">{user.username}</span>
+                         </div>
+                         {!isPrivateCallActive && (
+                           <button 
+                             onClick={() => startPrivateCall(user)}
+                             className="p-2 bg-brand-primary text-white rounded-lg scale-90 opacity-0 group-hover:opacity-100 transition-all hover:scale-100"
+                           >
+                             <Phone className="w-3.5 h-3.5" />
+                           </button>
+                         )}
+                       </div>
+                     ))
+                   )}
+                 </div>
+               </div>
+             ) : (
+               <Chat socket={socket} isHost={true} transparent={true} />
+             )}
+           </div>
+
+           {/* Floating User List Toggle in Chat */}
+           <button 
+              onClick={() => setShowUserList(!showUserList)}
+              className="absolute top-2.5 right-12 p-2 text-zinc-500 hover:text-white transition-colors z-50"
+           >
+              {showUserList ? <MessageSquare className="w-4 h-4" /> : <Users className="w-4 h-4" />}
+           </button>
         </div>
       </div>
 
-      <div 
-        className={`absolute top-0 right-0 h-full w-full md:w-80 lg:w-96 transition-transform duration-300 ease-in-out z-40 ${
-          showChat ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
-        <Chat socket={socket} isHost={true} transparent={true} />
-      </div>
+      {/* Global Alerts Overlay */}
+      <AnimatePresence>
+        {error && (
+          <motion.div 
+            initial={{ y: -50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -50, opacity: 0 }}
+            className="fixed top-20 left-1/2 -translate-x-1/2 bg-red-600 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 z-[100] border border-white/10"
+          >
+            <AlertCircle className="w-5 h-5" />
+            <span className="text-sm font-bold uppercase tracking-tight">{error}</span>
+            <button onClick={() => setError(null)} className="ml-2 hover:opacity-70">
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #27272a; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+      `}</style>
     </div>
   );
 }

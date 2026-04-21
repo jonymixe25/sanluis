@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Helmet } from "react-helmet-async";
 import Chat from "../components/Chat";
+import Logo from "../components/Logo";
 import { Link } from "react-router-dom";
 import { useLanguage } from "../context/LanguageContext";
 import { saveRecording } from "../utils/videoStorage";
@@ -594,8 +595,8 @@ export default function Broadcast() {
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md bg-[#141417] p-8 rounded-3xl border border-zinc-800 shadow-2xl"
         >
-          <div className="w-16 h-16 bg-brand-primary/10 rounded-2xl flex items-center justify-center mb-6 mx-auto">
-            <Lock className="w-8 h-8 text-brand-primary" />
+          <div className="flex justify-center mb-6">
+            <Logo size="xl" className="text-brand-primary" />
           </div>
           <h2 className="text-2xl font-bold text-center mb-2">Acceso Restringido</h2>
           <p className="text-zinc-500 text-center text-sm mb-8">Ingresa la contraseña para acceder al panel de transmisión profesional.</p>

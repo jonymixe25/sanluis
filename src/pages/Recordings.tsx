@@ -265,7 +265,7 @@ export default function Recordings() {
         <div className="pt-12 border-t border-white/5">
           <div className="flex items-center gap-3 mb-8">
             <Video className="w-6 h-6 text-brand-secondary" />
-            <h2 className="text-2xl font-bold text-white">Galería de la Comunidad</h2>
+            <h2 className="text-2xl font-bold text-white">{t.recordings.communityGallery}</h2>
           </div>
 
           {communityVideos.length > 0 ? (
@@ -282,14 +282,14 @@ export default function Recordings() {
                   </div>
                   <div className="p-4">
                     <h3 className="font-bold text-white line-clamp-1 mb-1">{video.title}</h3>
-                    <p className="text-xs text-neutral-500 mb-3">por {video.author}</p>
+                    <p className="text-xs text-neutral-500 mb-3">{t.home.by} {video.author}</p>
                     <div className="flex items-center justify-between mt-auto">
                       <span className="text-xs font-bold text-brand-secondary uppercase tracking-widest">{video.price}</span>
                       <button 
                         onClick={() => window.open(video.video_url, '_blank')}
                         className="text-xs font-bold text-neutral-400 hover:text-white flex items-center gap-1"
                       >
-                        Ver mas <ChevronRight className="w-3 h-3" />
+                        {t.recordings.seeMore} <ChevronRight className="w-3 h-3" />
                       </button>
                     </div>
                   </div>
@@ -299,7 +299,7 @@ export default function Recordings() {
           ) : (
             <div className="text-center py-16 bg-white/5 rounded-3xl border border-dashed border-white/5">
               <FileVideo className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
-              <p className="text-neutral-500">Aún no hay videos en la galería comunitaria.</p>
+              <p className="text-neutral-500">{t.recordings.noCommunityVideos}</p>
             </div>
           )}
         </div>

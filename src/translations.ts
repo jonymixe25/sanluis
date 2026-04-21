@@ -92,6 +92,9 @@ export interface Translations {
     errorSaving: string;
     errorLoading: string;
     selectVideoDesc: string;
+    communityGallery: string;
+    seeMore: string;
+    noCommunityVideos: string;
   };
   adminNews: {
     loginTitle: string;
@@ -280,6 +283,9 @@ export const translations: Record<Language, Translations> = {
       errorSaving: 'Error al guardar el video.',
       errorLoading: 'No se pudo cargar el video. Asegúrate de que el formato sea compatible.',
       selectVideoDesc: 'Selecciona una grabación de la lista para reproducirla.',
+      communityGallery: 'Galería de la Comunidad',
+      seeMore: 'Ver más',
+      noCommunityVideos: 'Aún no hay videos en la galería comunitaria.',
     },
     adminNews: {
       loginTitle: 'Administración',
@@ -466,6 +472,9 @@ export const translations: Record<Language, Translations> = {
       errorSaving: 'Error al guardar el video.',
       errorLoading: 'No se pudo cargar el video. Asegúrate de que el formato sea compatible.',
       selectVideoDesc: 'Selecciona una grabación de la lista para reproducirla.',
+      communityGallery: 'Ja Galería',
+      seeMore: 'Ixy',
+      noCommunityVideos: 'Ka\'t ja videos.',
     },
     adminNews: {
       loginTitle: 'Administración',

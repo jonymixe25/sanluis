@@ -1,6 +1,6 @@
 {
-  "name": "Remix: Vida Mixe TV",
-  "description": "Plataforma para la comunidad Mixe (Ayuuk) que permite administrar los miembros del equipo, conectando tradiciones y cultura.",
+  "name": "Vida Mixe TV",
+  "description": "Plataforma para la comunidad Mixe (Ayuuk) que permite administrar noticias, videos comunitarios y miembros del equipo.",
   "requestFramePermissions": [
     "camera",
     "microphone"

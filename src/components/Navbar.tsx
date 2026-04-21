@@ -1,6 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
-import { MonitorPlay, Library, Home, Users, LogIn, LogOut, User, Languages, Video } from "lucide-react";
-import Logo from "./Logo";
+import { Mountain, MonitorPlay, Library, Home, Users, LogIn, LogOut, User, Languages, Video } from "lucide-react";
 import { auth, loginWithGoogle, logout } from "../firebase";
 import { useEffect, useState } from "react";
 import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
@@ -31,8 +30,10 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <Link to="/" className="flex items-center gap-3 group">
-            <Logo className="text-brand-primary group-hover:scale-105 transition-transform" />
+          <Link to="/" className="flex items-center gap-2 group">
+            <div className="w-8 h-8 bg-brand-primary rounded-lg flex items-center justify-center group-hover:bg-brand-primary/80 transition-colors">
+              <Mountain className="w-5 h-5 text-white" />
+            </div>
             <span className="text-xl font-bold tracking-tight text-white">
               Vida <span className="text-brand-primary">Mixe</span> TV
             </span>

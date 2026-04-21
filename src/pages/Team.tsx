@@ -26,7 +26,7 @@ export default function Team() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { t } = useLanguage();
 
-  const isAdmin = user?.email === "mixecultura25@gmail.com";
+  const isAdmin = user?.email === "mixecultura25@gmail.com" || user?.email === "ayuuktv42@gmail.com";
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (u) => {

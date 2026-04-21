@@ -1,13 +1,15 @@
 import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
-import { useEffect, useState, FormEvent, ChangeEvent } from "react";
+import { useEffect, useState } from "react";
 import { io } from "socket.io-client";
 import { motion, AnimatePresence } from "motion/react";
 import { getSocketUrl } from "../utils/socket";
 import LivePreview from "../components/LivePreview";
 import { getRecordings, SavedRecording } from "../utils/videoStorage";
-import { Video, MonitorPlay, Mountain, CloudFog, Users, MessageSquare, Newspaper, Music, MapPin, X, Play, Sparkles, ArrowRight, ChevronRight, Upload, Image as ImageIcon } from "lucide-react";
+import { Video, MonitorPlay, Mountain, CloudFog, Users, MessageSquare, Newspaper, Music, MapPin, X, Play, Sparkles, ArrowRight, ChevronRight } from "lucide-react";
 import { useLanguage } from "../context/LanguageContext";
+import { db } from "../firebase";
+import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
 
 interface NewsItem {
   id: string;
@@ -27,19 +29,11 @@ export default function Home() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const { t } = useLanguage();
 
-  // News form state
-  const [showNewsForm, setShowNewsForm] = useState(false);
-  const [newNews, setNewNews] = useState({ title: "", content: "", imageUrl: "", videoUrl: "", password: "" });
-
-  const fetchNews = () => {
-    fetch("/api/news")
-      .then(res => res.json())
-      .then(data => setNews(data))
-      .catch(err => console.error("Error fetching news:", err));
-  };
-
   useEffect(() => {
-    fetchNews();
+    // Fetch News from Firestore
+    const unsubscribeNews = onSnapshot(query(collection(db, "news"), orderBy("date", "desc")), (snapshot) => {
+      setNews(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as NewsItem[]);
+    });
 
     // Check if anyone is live
     const socketUrl = getSocketUrl();
@@ -67,42 +61,11 @@ export default function Home() {
     loadRandomRecording();
 
     return () => { 
+      unsubscribeNews();
       socket.disconnect(); 
       if (videoUrl) URL.revokeObjectURL(videoUrl);
     };
   }, []);
-
-  const handlePublishNews = async (e: FormEvent) => {
-    e.preventDefault();
-    try {
-      const res = await fetch("/api/news", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newNews)
-      });
-      if (res.ok) {
-        setNewNews({ title: "", content: "", imageUrl: "", videoUrl: "", password: "" });
-        setShowNewsForm(false);
-        fetchNews();
-      } else {
-        const data = await res.json();
-        alert(data.error || t.home.publishError);
-      }
-    } catch (err) {
-      console.error("Error publishing news:", err);
-    }
-  };
-
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewNews({ ...newNews, imageUrl: reader.result as string });
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-brand-bg text-neutral-50 flex flex-col font-sans selection:bg-brand-primary selection:text-white">
@@ -315,104 +278,12 @@ export default function Home() {
               <h2 className="text-5xl font-black text-white tracking-tighter">{t.news.title}</h2>
             </div>
             <div className="flex items-center gap-4">
-              <button 
-                onClick={() => setShowNewsForm(!showNewsForm)}
-                className="group flex items-center gap-2 px-6 py-3 bg-brand-primary/20 text-brand-primary border border-brand-primary/30 rounded-xl font-bold text-sm transition-all hover:bg-brand-primary hover:text-white"
-              >
-                <Newspaper className="w-4 h-4" />
-                <span>{showNewsForm ? t.news.closeForm : t.news.publishNews}</span>
-              </button>
               <Link to="/admin-news" className="group flex items-center gap-2 text-neutral-500 hover:text-white font-bold text-sm transition-all">
                 <span>{t.home.adminPanel}</span>
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
             </div>
           </div>
-
-          <AnimatePresence>
-            {showNewsForm && (
-              <motion.div 
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="mb-16 overflow-hidden"
-              >
-                <form onSubmit={handlePublishNews} className="bg-brand-surface border border-white/10 rounded-3xl p-8 space-y-6 max-w-2xl mx-auto shadow-2xl">
-                  <h3 className="text-2xl font-black text-white uppercase tracking-tight">{t.news.newPost}</h3>
-                  <div className="grid gap-4">
-                    <input 
-                      type="text" 
-                      placeholder={t.news.newsTitle} 
-                      required
-                      value={newNews.title}
-                      onChange={e => setNewNews({...newNews, title: e.target.value})}
-                      className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-brand-primary outline-none transition-colors"
-                    />
-                    <textarea 
-                      placeholder={t.news.newsContent} 
-                      required
-                      value={newNews.content}
-                      onChange={e => setNewNews({...newNews, content: e.target.value})}
-                      className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-brand-primary outline-none transition-colors min-h-[120px]"
-                    />
-                    <div className="grid sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-neutral-500 uppercase tracking-widest ml-1">{t.news.imageLabel}</label>
-                        <div className="flex gap-2">
-                          <label className="flex-1 flex items-center justify-center gap-2 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white cursor-pointer hover:border-brand-primary transition-colors">
-                            <Upload className="w-4 h-4" />
-                            <span className="text-sm truncate">{newNews.imageUrl && newNews.imageUrl.startsWith('data:') ? t.news.imageSelected : t.news.uploadFile}</span>
-                            <input type="file" accept="image/*" onChange={handleFileChange} className="hidden" />
-                          </label>
-                          <input 
-                            type="url" 
-                            placeholder={t.news.pasteUrl} 
-                            value={newNews.imageUrl && !newNews.imageUrl.startsWith('data:') ? newNews.imageUrl : ''}
-                            onChange={e => setNewNews({...newNews, imageUrl: e.target.value})}
-                            className="flex-1 bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-brand-primary outline-none transition-colors text-sm"
-                          />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-neutral-500 uppercase tracking-widest ml-1">{t.news.videoUrl}</label>
-                        <input 
-                          type="url" 
-                          placeholder={t.news.videoUrl} 
-                          value={newNews.videoUrl}
-                          onChange={e => setNewNews({...newNews, videoUrl: e.target.value})}
-                          className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-brand-primary outline-none transition-colors text-sm"
-                        />
-                      </div>
-                    </div>
-
-                    {newNews.imageUrl && (
-                      <div className="relative aspect-video rounded-xl overflow-hidden border border-white/10">
-                        <img src={newNews.imageUrl} alt="Preview" className="w-full h-full object-cover" />
-                        <button 
-                          type="button"
-                          onClick={() => setNewNews({...newNews, imageUrl: ""})}
-                          className="absolute top-2 right-2 p-1 bg-black/60 text-white rounded-full hover:bg-red-500 transition-colors"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
-                    <input 
-                      type="password" 
-                      placeholder={t.news.adminPassword} 
-                      required
-                      value={newNews.password}
-                      onChange={e => setNewNews({...newNews, password: e.target.value})}
-                      className="bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:border-brand-primary outline-none transition-colors"
-                    />
-                  </div>
-                  <button type="submit" className="w-full py-4 bg-brand-primary text-white font-black rounded-xl hover:bg-brand-primary/80 transition-all shadow-lg shadow-brand-primary/20">
-                    {t.news.publishNow}
-                  </button>
-                </form>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-10">
             {news.length > 0 ? (

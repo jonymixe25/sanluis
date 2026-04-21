@@ -1,17 +1,35 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Trash2, Download, Play, Clock, FileVideo, Calendar, Upload, ShoppingCart } from "lucide-react";
+import { Trash2, Download, Play, Clock, FileVideo, Calendar, Upload, ShoppingCart, Video, ChevronRight } from "lucide-react";
 import { getRecordings, deleteRecording, saveRecording, SavedRecording } from "../utils/videoStorage";
 import { useLanguage } from "../context/LanguageContext";
+import { db } from "../firebase";
+import { collection, onSnapshot } from "firebase/firestore";
+
+interface CommunityVideo {
+  id: string;
+  title: string;
+  author: string;
+  thumbnail: string;
+  price: string;
+  video_url: string;
+}
 
 export default function Recordings() {
   const [recordings, setRecordings] = useState<SavedRecording[]>([]);
+  const [communityVideos, setCommunityVideos] = useState<CommunityVideo[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedVideo, setSelectedVideo] = useState<string | null>(null);
   const { t } = useLanguage();
 
   useEffect(() => {
     loadRecordings();
+
+    const unsubscribeVideos = onSnapshot(collection(db, "community_videos"), (snapshot) => {
+      setCommunityVideos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as CommunityVideo[]);
+    });
+
+    return () => unsubscribeVideos();
   }, []);
 
   const loadRecordings = async () => {
@@ -241,6 +259,49 @@ export default function Recordings() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Community Videos Gallery */}
+        <div className="pt-12 border-t border-white/5">
+          <div className="flex items-center gap-3 mb-8">
+            <Video className="w-6 h-6 text-brand-secondary" />
+            <h2 className="text-2xl font-bold text-white">Galería de la Comunidad</h2>
+          </div>
+
+          {communityVideos.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 text-neutral-50">
+              {communityVideos.map((video) => (
+                <div key={video.id} className="group bg-brand-surface border border-white/5 rounded-2xl overflow-hidden hover:border-brand-secondary/30 transition-all hover:-translate-y-1">
+                  <div className="relative aspect-video">
+                    <img src={video.thumbnail} alt={video.title} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="w-12 h-12 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center">
+                        <Play className="w-5 h-5 text-white fill-white" />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-4">
+                    <h3 className="font-bold text-white line-clamp-1 mb-1">{video.title}</h3>
+                    <p className="text-xs text-neutral-500 mb-3">por {video.author}</p>
+                    <div className="flex items-center justify-between mt-auto">
+                      <span className="text-xs font-bold text-brand-secondary uppercase tracking-widest">{video.price}</span>
+                      <button 
+                        onClick={() => window.open(video.video_url, '_blank')}
+                        className="text-xs font-bold text-neutral-400 hover:text-white flex items-center gap-1"
+                      >
+                        Ver mas <ChevronRight className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-16 bg-white/5 rounded-3xl border border-dashed border-white/5">
+              <FileVideo className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
+              <p className="text-neutral-500">Aún no hay videos en la galería comunitaria.</p>
+            </div>
+          )}
         </div>
       </div>
     </div>
